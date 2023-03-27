@@ -1,0 +1,95 @@
+- name: Gets current date
+  set_fact:
+    current_date: "{{lookup('pipe','date +%Y.%m.%d\\ %Hh%M')}}"
+
+- name: Ensures folder is present
+  vcenter_folder:
+    hostname: '{{ vcenter_hostname }}'
+    username: '{{ vsphere_username }}'
+    password: '{{ vsphere_password }}'
+    datacenter_name: "{{ datacenter_name }}"
+    folder_name: '{{ vm_folder }}'
+    folder_type: vm
+    state: present
+    validate_certs: false
+  delegate_to: localhost
+
+- name: Clones VM from template
+  vmware_guest:
+    hostname: '{{ vcenter_hostname }}'
+    username: '{{ vsphere_username }}'
+    password: '{{ vsphere_password }}'
+    validate_certs: false
+    datacenter: '{{ datacenter_name }}'
+    datastore: '{{ datastore_name }}'
+    cluster: '{{ cluster_name | default(omit) }}'
+    state: poweredon
+    template: '{{ vm_template }}'
+    annotation: 'VM built from {{ vm_template }} template on {{ current_date }}'
+    name: '{{ inventory_hostname }}'
+    folder: '/{{ datacenter_name }}/vm/{{ vm_folder }}'
+    customization:
+      hostname: '{{ inventory_hostname }}'
+    hardware:
+      hotadd_cpu: true
+      hotadd_memory: true
+      memory_mb: '{{ vm_ram * 1024 }}'
+      num_cpus: '{{ vm_cpu }}'
+    networks:
+      - name: '{{ vm_network }}'
+        start_connected: true
+        type: static
+        ip: "{{ vm_ip }}"
+        netmask: "{{ vm_netmask }}"
+        gateway: "{{ vm_gateway }}"
+    wait_for_ip_address: true
+  delegate_to: localhost
+
+- name: Ensures host is present in /etc/hosts
+  lineinfile:
+    path: /etc/hosts
+    regexp: '^{{ vm_ip }}'
+    line: '{{ vm_ip }}           {{ inventory_hostname }}'
+  become: true
+  delegate_to: localhost
+
+- name: Ensures SSH public key is absent from known keys
+  known_hosts:
+    state: absent
+    name: '{{ item }}'
+  loop:
+    - '{{ inventory_hostname }}'
+    - '{{ vm_ip }}'
+  delegate_to: localhost
+
+- name: Ensures Ansible group is present
+  group:
+    name: ansible
+    gid: 5000
+    state: present
+
+- name: Ensures Ansible user is present
+  user:
+    name: ansible
+    comment: Ansible
+    group: ansible
+    uid: 5000
+    state: present
+
+- name: Ensures public SSH keys are present
+  authorized_key:
+    user: ansible
+    exclusive: false
+    key: "{{ item }}"
+    state: present
+  with_file:
+  - "/home/frederic/.ssh/id_rsa.pub"
+
+- name: Ensures /etc/sudoers.d/ansible is present
+  copy:
+    content: "ansible ALL=(ALL) NOPASSWD: ALL"
+    dest: "/etc/sudoers.d/ansible"
+    owner: root
+    group: root
+    mode: 0440
+    validate: 'visudo -cf %s'

@@ -1,0 +1,34 @@
+- name: Gets current date
+  set_fact:
+    current_date: "{{lookup('pipe','date +%Y.%m.%d-%Hh%M')}}"
+
+- name: Gets VM facts
+  vmware_guest_info:
+    hostname: '{{ vcenter_hostname }}'
+    username: '{{ vsphere_username }}'
+    password: '{{ vsphere_password }}'
+    datacenter: '{{ datacenter_name }}'
+    name: '{{ inventory_hostname }}'
+    validate_certs: false
+  delegate_to: localhost
+  register: vm_facts
+
+- name: Extracts VM folder path
+  set_fact:
+    vm_current_folder: '{{ vm_facts.instance.hw_folder }}'
+
+- name: Takes a snapshot
+  vmware_guest_snapshot:
+    hostname: '{{ vcenter_hostname }}'
+    username: '{{ vsphere_username }}'
+    password: '{{ vsphere_password }}'
+    validate_certs: false
+    name: '{{ inventory_hostname }}'
+    datacenter: '{{ datacenter_name }}'
+    description: 'Taken by Ansible on {{ current_date }}'
+    folder: '{{ vm_current_folder }}'
+    memory_dump: false
+    quiesce: false
+    snapshot_name: 'snapshot-{{ current_date }}'
+    state: present
+  delegate_to: localhost
